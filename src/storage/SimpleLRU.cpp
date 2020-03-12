@@ -94,11 +94,10 @@ bool SimpleLRU::Set(const std::string &key, const std::string &value) {
 		}
 	}
 	cur_node.value = value;
-	current_size += difference;
 	return true;
 }
 
-// See MapBasedGlobalLockImpl.h
+// See MapBasedGlobalLockmpl.h
 bool SimpleLRU::Delete(const std::string &key) { 
 	auto cur = _lru_index.find(key);
 	if (cur == _lru_index.end()) {
@@ -108,7 +107,7 @@ bool SimpleLRU::Delete(const std::string &key) {
 	current_size -= (cur_node.key.size() + cur_node.value.size());
 	extract_node(&cur_node);
 	_lru_index.erase(cur);
-	 return true;
+	return true;
 }
 
 // See MapBasedGlobalLockImpl.h
