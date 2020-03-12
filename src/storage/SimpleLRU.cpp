@@ -84,7 +84,7 @@ bool SimpleLRU::Set(const std::string &key, const std::string &value) {
 	}
 	lru_node &cur_node = cur->second;
 	int difference = value.size() -  cur_node.value.size();
-	if (value.size() + key.size()  > _max_size) {
+	if (value.size() + key.size() > _max_size) {
 			return false;
 	}
 	to_end(&cur_node);
