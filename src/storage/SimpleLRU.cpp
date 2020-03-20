@@ -3,7 +3,7 @@
 namespace Afina {
 namespace Backend {
 
-void SimpleLRU::extract_node(lru_node *node) {
+void SimpleLRU::delete_node_from_list(lru_node *node) {
 	if (node == _lru_head.get()) {
 		if (node->next.get() == nullptr) {
 			 _lru_head.reset(nullptr);
@@ -78,15 +78,15 @@ bool SimpleLRU::PutIfAbsent(const std::string &key, const std::string &value) {
 
 // See MapBasedGlobalLockImpl.h
 bool SimpleLRU::Set(const std::string &key, const std::string &value) { 
+	if (value.size() + key.size() > _max_size) {
+			return false;
+	}
 	auto cur = _lru_index.find(key);
 	if (cur  == _lru_index.end()) {
 		return false;
 	}
 	lru_node &cur_node = cur->second;
 	int difference = value.size() -  cur_node.value.size();
-	if (value.size() + key.size() > _max_size) {
-			return false;
-	}
 	to_end(&cur_node);
 	if (difference > 0) {
 		while (difference + current_size > _max_size) {
@@ -105,8 +105,8 @@ bool SimpleLRU::Delete(const std::string &key) {
 	}
 	lru_node &cur_node = cur->second;
 	current_size -= (cur_node.key.size() + cur_node.value.size());
-	extract_node(&cur_node);
 	_lru_index.erase(cur);
+	delete_node_from_list(&cur_node);
 	return true;
 }
 

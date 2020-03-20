@@ -20,17 +20,9 @@ public:
     SimpleLRU(size_t max_size = 1024) : _max_size(max_size), current_size(0), _lru_head(nullptr) {}
     ~SimpleLRU() {
         _lru_index.clear();
-	if (_lru_head != nullptr)
-        {
-            while (_lru_head->next != nullptr)
-            {
-                std::unique_ptr<lru_node> bufer;
-                bufer.swap(_lru_head->next);
-                _lru_head.swap(bufer);
-                bufer.reset();
-            }
-	    _lru_head.reset();
-        }
+        while(_lru_head != nullptr) {
+             _lru_head = std::move(_lru_head->next);
+	}
     }
 
     // Implements Afina::Storage interface
@@ -70,7 +62,7 @@ private:
     // Index of nodes from list above, allows fast random access to elements by lru_node#key
     std::map<std::reference_wrapper<const std::string>, std::reference_wrapper<lru_node>, std::less<std::string>> _lru_index;
     void to_end(lru_node *node);	
-    void extract_node(lru_node *node);
+    void delete_node_from_list(lru_node *node);
 	
 };
 
