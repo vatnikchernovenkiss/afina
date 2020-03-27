@@ -8,28 +8,41 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <atomic>
 
 namespace Afina {
 namespace Concurrency {
 
+class Executor;
+void perform(Executor *executor);
 /**
  * # Thread pool
  */
 class Executor {
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
-        kRun,
+            kRun,
 
         // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
         // completed as requested
-        kStopping,
+            kStopping,
 
         // Threadppol is stopped
-        kStopped
+            kStopped
     };
 
-    Executor(std::string name, int size);
-    ~Executor();
+public:
+    Executor(std::string name, int size, int low, int high, int time) :
+        max_queue_size(size),
+        hight_watermark(high),
+        low_watermark(low),
+        idle_time(time),
+        number_of_threads(0),
+        free_threads(0) {};
+
+    ~Executor() {Stop(true);};
+
+    void Start();
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -51,15 +64,20 @@ class Executor {
         auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
         std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
+        if (state != State::kRun || tasks.size() >= max_queue_size) {
             return false;
         }
 
         // Enqueue new task
         tasks.push_back(exec);
+        if (free_threads == 0 && number_of_threads < hight_watermark) {
+            std::thread(&perform, this).detach();
+            number_of_threads++;
+        }
         empty_condition.notify_one();
         return true;
     }
+    void Stopping();
 
 private:
     // No copy/move/assign allowed
@@ -72,6 +90,8 @@ private:
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
     friend void perform(Executor *executor);
+
+    void eraseThread();
 
     /**
      * Mutex to protect state below from concurrent modification
@@ -97,6 +117,16 @@ private:
      * Flag to stop bg threads
      */
     State state;
+
+    int low_watermark;
+    int hight_watermark;
+    int max_queue_size;
+    int idle_time;
+    int free_threads;
+    int number_of_threads;
+
+    std::condition_variable stop_work;
+
 };
 
 } // namespace Concurrency
