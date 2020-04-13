@@ -1,17 +1,22 @@
+# add dependencies
+include_directories(${PROJECT_SOURCE_DIR}/src)
+include_directories(${PROJECT_SOURCE_DIR}/include)
+
+add_subdirectory(allocator)
+add_subdirectory(concurrency)
+add_subdirectory(coroutine)
+add_subdirectory(logging)
+add_subdirectory(execute)
+add_subdirectory(protocol)
+add_subdirectory(network)
+add_subdirectory(storage)
+
+# Generate version file
+set(version_file "${CMAKE_CURRENT_BINARY_DIR}/Version.cpp")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/Version.cpp.in ${version_file})
+
 # build service
-set(SOURCE_FILES
-    st_blocking/ServerImpl.cpp
-    mt_blocking/ServerImpl.cpp
-
-    st_nonblocking/ServerImpl.cpp
-    st_nonblocking/Connection.cpp
-    st_nonblocking/Utils.cpp
-
-    mt_nonblocking/ServerImpl.cpp
-    mt_nonblocking/Connection.cpp
-    mt_nonblocking/Worker.cpp
-    mt_nonblocking/Utils.cpp
-)
-
-add_library(Network ${SOURCE_FILES})
-target_link_libraries(Network pthread Logging Protocol Execute Concurrency ${CMAKE_THREAD_LIBS_INIT})
+set(SOURCE_FILES main.cpp ${version_file})
+add_executable(afina ${SOURCE_FILES} ${BACKWARD_ENABLE})
+target_link_libraries(afina Logging Concurrency Network Storage cxxopts spdlog)
+add_backward(afina)
