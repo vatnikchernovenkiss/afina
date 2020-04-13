@@ -48,7 +48,7 @@ private:
     std::vector<std::string> replies;
     int current_bytes = 0;
 
-    ssize_t cur_position = 0;
+    int rest = 0;
 };
 
 } // namespace STnonblock

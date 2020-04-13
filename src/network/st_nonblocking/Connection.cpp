@@ -13,6 +13,14 @@ void Connection::Start() {
     _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
     _event.data.fd = _socket;
     _event.data.ptr = this;
+    command_to_execute.reset();
+    argument_for_command.resize(0);
+    parser.Reset();
+    arg_remains = 0;
+
+    rest = 0;
+    current_bytes = 0;
+    replies.clear();
 }
 
 // See Connection.h
@@ -30,7 +38,6 @@ void Connection::OnClose() {
 // See Connection.h
 void Connection::DoRead() {
     _logger->debug("Read from {} socket", _socket);
-
     try {
         int readed_bytes = 0;
         char client_buffer[4096] = {0};
@@ -72,7 +79,7 @@ void Connection::DoRead() {
                     _logger->debug("Fill argument: {} bytes of {}", readed_bytes, arg_remains);
                     // There is some parsed command, and now we are reading argument
                     std::size_t to_read = std::min(arg_remains, std::size_t(readed_bytes));
-                    argument_for_command.append(client_buffer, to_read);
+                    argument_for_command.append(client_buffer, to_read - 2 * (to_read == arg_remains));
 
                     std::memmove(client_buffer, client_buffer + to_read, readed_bytes - to_read);
                     arg_remains -= to_read;
@@ -88,6 +95,7 @@ void Connection::DoRead() {
 
                     // Send response
                     result += "\r\n";
+                    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLOUT;
                     replies.push_back(result);
                     // Prepare for the next command
                     command_to_execute.reset();
@@ -112,29 +120,25 @@ void Connection::DoWrite() {
         return;
     }
     _logger->debug("Write on {} socket", _socket);
-
-    struct iovec iovecs[replies.size()];
-
-    iovecs[0].iov_len = replies[0].size() - cur_position;
-    iovecs[0].iov_base = &(replies[0][0]) + cur_position;
+    struct iovec messages[replies.size()];
+    messages[0].iov_len = replies[0].size() - rest;
+    messages[0].iov_base = &(replies[0][0]) + rest;
     for (int i = 1; i < replies.size(); i++) {
-        iovecs[i].iov_len = replies[i].size();
-        iovecs[i].iov_base = &(replies[i][0]);
+        messages[i].iov_len = replies[i].size();
+        messages[i].iov_base = &(replies[i][0]);
     }
-
     int written;
-    if ((written = writev(_socket, iovecs, replies.size())) <= 0) {
+    if ((written = writev(_socket, messages, replies.size())) <= 0) {
         OnError();
     }
-    cur_position += written;
-
+    rest += written;
     int i = 0;
-    for (; (i >= replies.size() || (cur_position - iovecs[i].iov_len) < 0); i++) {
-        cur_position -= iovecs[i].iov_len;
+    for (; !(i >= replies.size() || (rest - messages[i].iov_len) < 0); i++) {
+        rest -= messages[i].iov_len;
     }
     replies.erase(replies.begin(), replies.begin() + i);
     if (replies.empty()) {
-        _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR; // без записи
+        _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
     }
 }
 
