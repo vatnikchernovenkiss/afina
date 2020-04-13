@@ -1,11 +1,12 @@
+
 #ifndef AFINA_NETWORK_MT_BLOCKING_SERVER_H
 #define AFINA_NETWORK_MT_BLOCKING_SERVER_H
 
+#include <afina/concurrency/Executor.h>
 #include <atomic>
-#include <thread>
 #include <condition_variable>
 #include <set>
-#include <afina/concurrency/Executor.h>
+#include <thread>
 
 #include <afina/network/Server.h>
 
@@ -42,7 +43,6 @@ protected:
     void OnRun();
 
 private:
-
     void worker(int client_socket);
 
     // Logger instance
@@ -66,7 +66,6 @@ private:
     std::mutex socket_mutex;
     std::set<int> sockets;
     Afina::Concurrency::Executor executor;
-
     std::mutex stop;
     std::condition_variable before_ending;
 };

@@ -1,12 +1,11 @@
-
 #include "ServerImpl.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
-#include <algorithm>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -22,6 +21,7 @@
 #include <afina/Storage.h>
 #include <afina/execute/Command.h>
 #include <afina/logging/Service.h>
+
 #include "protocol/Parser.h"
 
 namespace Afina {
@@ -29,8 +29,8 @@ namespace Network {
 namespace MTblocking {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl), executor("", 5, 4, 10, 3000) {} 
-
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl)
+    : Server(ps, pl), executor("", 5, 5, 5, 1000) {}
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
@@ -38,6 +38,7 @@ ServerImpl::~ServerImpl() {}
 void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     _logger = pLogging->select("network");
     _logger->info("Start mt_blocking network service");
+    executor.Start();
 
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
@@ -45,7 +46,6 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0) {
         throw std::runtime_error("Unable to mask SIGPIPE");
     }
-	   executor.Start();
 
     struct sockaddr_in server_addr;
     std::memset(&server_addr, 0, sizeof(server_addr));
@@ -73,7 +73,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
         close(_server_socket);
         throw std::runtime_error("Socket listen() failed");
     }
-	number_of_workers = 0;
+    number_of_workers = 0;
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
 }
@@ -85,17 +85,17 @@ void ServerImpl::Stop() {
     for (auto socket : sockets) {
         shutdown(socket, SHUT_RD);
     }
-
 }
 
 // See Server.h
 void ServerImpl::Join() {
-
+    std::unique_lock<std::mutex> lock(stop);
+    while (number_of_workers != 0) {
+        before_ending.wait(lock, [this]() { return number_of_workers == 0; });
+    }
     assert(_thread.joinable());
     _thread.join();
-    close(_server_socket);
     executor.Stop(true);
-
 }
 
 // See Server.h
@@ -132,13 +132,14 @@ void ServerImpl::OnRun() {
         }
 
         // TODO: Start new thread and process data from/to connection
-       if (!executor.Execute(&ServerImpl::worker, this, client_socket)) {
+        if (!executor.Execute(&ServerImpl::worker, this, client_socket)) {
             close(client_socket);
         }
     }
 
     // Cleanup on exit...
     _logger->warn("Network stopped");
+    close(_server_socket);
 }
 
 void ServerImpl::worker(int client_socket) {
@@ -191,7 +192,7 @@ void ServerImpl::worker(int client_socket) {
                     _logger->debug("Fill argument: {} bytes of {}", readed_bytes, arg_remains);
                     // There is some parsed command, and now we are reading argument
                     std::size_t to_read = std::min(arg_remains, std::size_t(readed_bytes));
-                    argument_for_command.append(client_buffer, to_read);
+                    argument_for_command.append(client_buffer, to_read - (arg_remains == to_read) * 2);
 
                     std::memmove(client_buffer, client_buffer + to_read, readed_bytes - to_read);
                     arg_remains -= to_read;
@@ -221,11 +222,11 @@ void ServerImpl::worker(int client_socket) {
         if (readed_bytes == 0 || errno == EAGAIN || errno == EWOULDBLOCK) {
             _logger->debug("Connection closed");
         } else {
-                throw std::runtime_error(std::string(strerror(errno)));
-            }
-        } catch (std::runtime_error &ex) {
-            _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
+            throw std::runtime_error(std::string(strerror(errno)));
         }
+    } catch (std::runtime_error &ex) {
+        _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
+    }
 
     // We are done with this connection
     close(client_socket);
