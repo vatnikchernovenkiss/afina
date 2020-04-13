@@ -1,6 +1,7 @@
 #ifndef AFINA_CONCURRENCY_EXECUTOR_H
 #define AFINA_CONCURRENCY_EXECUTOR_H
 
+#include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -8,39 +9,34 @@
 #include <queue>
 #include <string>
 #include <thread>
-#include <atomic>
 
 namespace Afina {
 namespace Concurrency {
 
 class Executor;
-void perform(Executor *executor);
+void process(Executor *executor);
 /**
  * # Thread pool
  */
 class Executor {
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
-            kRun,
+        kRun,
 
         // Threadpool is on the way to be shutdown, no ned task could be added, but existing will be
         // completed as requested
-            kStopping,
+        kStopping,
 
         // Threadppol is stopped
-            kStopped
+        kStopped
     };
 
 public:
-    Executor(std::string name, int size, int low, int high, int time) :
-        max_queue_size(size),
-        hight_watermark(high),
-        low_watermark(low),
-        idle_time(time),
-        number_of_threads(0),
-        free_threads(0) {};
+    Executor(std::string name, int size, int low, int high, int time)
+        : max_queue_size(size), hight_watermark(high), low_watermark(low), idle_time(time), number_of_threads(0),
+          free_threads(0){};
 
-    ~Executor() {Stop(true);};
+    ~Executor() { Stop(true); };
 
     void Start();
 
@@ -60,19 +56,19 @@ public:
      * execution finished by itself
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
-        // Prepare "task"
-        auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
-
-        std::unique_lock<std::mutex> lock(this->mutex);
         if (state != State::kRun || tasks.size() >= max_queue_size) {
             return false;
         }
+        // Prepare "task"
+        auto to_exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
+
+        std::unique_lock<std::mutex> lock(mutex);
 
         // Enqueue new task
-        tasks.push_back(exec);
+        tasks.push_back(to_exec);
         if (free_threads == 0 && number_of_threads < hight_watermark) {
-            std::thread(&perform, this).detach();
             number_of_threads++;
+            std::thread(&process, this).detach();
         }
         empty_condition.notify_one();
         return true;
@@ -89,7 +85,7 @@ private:
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor);
+    friend void process(Executor *executor);
 
     void eraseThread();
 
@@ -97,7 +93,7 @@ private:
      * Mutex to protect state below from concurrent modification
      */
     std::mutex mutex;
-
+    std::mutex end_mutex;
     /**
      * Conditional variable to await new data in case of empty queue
      */
@@ -126,7 +122,6 @@ private:
     int number_of_threads;
 
     std::condition_variable stop_work;
-
 };
 
 } // namespace Concurrency
