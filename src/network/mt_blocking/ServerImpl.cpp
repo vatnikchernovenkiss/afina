@@ -1,3 +1,5 @@
+
+
 #include "ServerImpl.h"
 
 #include <algorithm>
@@ -30,7 +32,7 @@ namespace MTblocking {
 
 // See Server.h
 ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl)
-    : Server(ps, pl), executor("", 5, 5, 5, 1000) {}
+    : Server(ps, pl), executor("", 5, 5, 10, 1000) {}
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
@@ -38,7 +40,6 @@ ServerImpl::~ServerImpl() {}
 void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     _logger = pLogging->select("network");
     _logger->info("Start mt_blocking network service");
-    executor.Start();
 
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
@@ -46,7 +47,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
     if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0) {
         throw std::runtime_error("Unable to mask SIGPIPE");
     }
-
+    executor.Start();
     struct sockaddr_in server_addr;
     std::memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;         // IPv4
@@ -74,12 +75,15 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
     number_of_workers = 0;
+    max_workers = n_workers;
     running.store(true);
     _thread = std::thread(&ServerImpl::OnRun, this);
 }
 
 // See Server.h
 void ServerImpl::Stop() {
+    std::lock_guard<std::mutex> lock(socket_mutex);
+    executor.Stop(true);
     running.store(false);
     shutdown(_server_socket, SHUT_RDWR);
     for (auto socket : sockets) {
@@ -89,13 +93,8 @@ void ServerImpl::Stop() {
 
 // See Server.h
 void ServerImpl::Join() {
-    std::unique_lock<std::mutex> lock(stop);
-    while (number_of_workers != 0) {
-        before_ending.wait(lock, [this]() { return number_of_workers == 0; });
-    }
     assert(_thread.joinable());
     _thread.join();
-    executor.Stop(true);
 }
 
 // See Server.h
@@ -103,7 +102,7 @@ void ServerImpl::OnRun() {
     while (running.load()) {
         _logger->debug("waiting for connection...");
         // The call to accept() blocks until the incoming connection arrives
-        int client_socket;
+        int client_socket = 0;
         struct sockaddr client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
         if ((client_socket = accept(_server_socket, (struct sockaddr *)&client_addr, &client_addr_len)) == -1) {
@@ -148,13 +147,13 @@ void ServerImpl::worker(int client_socket) {
     // - command_to_execute: last command parsed out of stream
     // - arg_remains: how many bytes to read from stream to get command argument
     // - argument_for_command: buffer stores argument
-    std::size_t arg_remains;
+    std::size_t arg_remains = 0;
     Protocol::Parser parser;
     std::string argument_for_command;
     std::unique_ptr<Execute::Command> command_to_execute;
     try {
         int readed_bytes = 0;
-        char client_buffer[4096];
+        char client_buffer[4096] = {0};
         while ((readed_bytes = read(client_socket, client_buffer, sizeof(client_buffer))) > 0) {
             _logger->debug("Got {} bytes from socket", readed_bytes);
 
@@ -166,7 +165,7 @@ void ServerImpl::worker(int client_socket) {
                 _logger->debug("Process {} bytes", readed_bytes);
                 // There is no command yet
                 if (!command_to_execute) {
-                    std::size_t parsed = 0;
+                    size_t parsed = 0;
                     if (parser.Parse(client_buffer, readed_bytes, parsed)) {
                         // There is no command to be launched, continue to parse input stream
                         // Here we are, current chunk finished some command, process it
@@ -186,13 +185,12 @@ void ServerImpl::worker(int client_socket) {
                         readed_bytes -= parsed;
                     }
                 }
-
                 // There is command, but we still wait for argument to arrive...
                 if (command_to_execute && arg_remains > 0) {
                     _logger->debug("Fill argument: {} bytes of {}", readed_bytes, arg_remains);
                     // There is some parsed command, and now we are reading argument
                     std::size_t to_read = std::min(arg_remains, std::size_t(readed_bytes));
-                    argument_for_command.append(client_buffer, to_read - (arg_remains == to_read) * 2);
+                    argument_for_command.append(client_buffer, to_read - (to_read == arg_remains) * 2);
 
                     std::memmove(client_buffer, client_buffer + to_read, readed_bytes - to_read);
                     arg_remains -= to_read;
@@ -211,7 +209,6 @@ void ServerImpl::worker(int client_socket) {
                     if (send(client_socket, result.data(), result.size(), 0) <= 0) {
                         throw std::runtime_error("Failed to send response");
                     }
-
                     // Prepare for the next command
                     command_to_execute.reset();
                     argument_for_command.resize(0);
@@ -225,21 +222,17 @@ void ServerImpl::worker(int client_socket) {
             throw std::runtime_error(std::string(strerror(errno)));
         }
     } catch (std::runtime_error &ex) {
-        _logger->error("Failed to process connection on descriptor {}: {}", client_socket, ex.what());
+        _logger->error("ERROR!Failed to process connection on descriptor {}: {}", client_socket, ex.what());
+        std::string result("ERROR!Failed to process connection\r\n");
+        send(client_socket, result.data(), result.size(), 0);
     }
-
     // We are done with this connection
     close(client_socket);
-
-    // Prepare for the next command: just in case if connection was closed in the middle of executing something
-    command_to_execute.reset();
-    argument_for_command.resize(0);
-    parser.Reset();
     {
         std::lock_guard<std::mutex> lock(socket_mutex);
         sockets.erase(client_socket);
     }
-    if (--number_of_workers == 0) {
+    if (--number_of_workers == 0 && running.load() == false) {
         before_ending.notify_all();
     }
 }

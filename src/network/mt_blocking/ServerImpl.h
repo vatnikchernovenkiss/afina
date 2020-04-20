@@ -54,20 +54,21 @@ private:
     std::atomic<bool> running;
 
     // Server socket to accept connections on
-    int _server_socket;
+    int _server_socket = 0;
 
     // Thread to run network on
     std::thread _thread;
 
     std::atomic<int> number_of_workers;
 
-    uint32_t max_workers;
+    uint32_t max_workers = 0;
 
     std::mutex socket_mutex;
     std::set<int> sockets;
-    Afina::Concurrency::Executor executor;
+
     std::mutex stop;
     std::condition_variable before_ending;
+    Afina::Concurrency::Executor executor;
 };
 
 } // namespace MTblocking
