@@ -62,7 +62,7 @@ public:
         // Prepare "task"
         auto to_exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
-        std::unique_lock<std::mutex> lock(mutex);
+        std::lock_guard<std::mutex> lock(mutex);
 
         // Enqueue new task
         tasks.push_back(to_exec);
@@ -114,12 +114,12 @@ private:
      */
     State state;
 
-    int low_watermark;
-    int hight_watermark;
-    int max_queue_size;
-    int idle_time;
-    int free_threads;
-    int number_of_threads;
+    int low_watermark = 0;
+    int hight_watermark = 0;
+    int max_queue_size = 0;
+    int idle_time = 0;
+    int free_threads = 0;
+    int number_of_threads = 0;
 
     std::condition_variable stop_work;
 };
