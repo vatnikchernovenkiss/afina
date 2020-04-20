@@ -1,10 +1,11 @@
+
 #ifndef AFINA_NETWORK_MT_BLOCKING_SERVER_H
 #define AFINA_NETWORK_MT_BLOCKING_SERVER_H
 
 #include <atomic>
-#include <thread>
 #include <condition_variable>
 #include <set>
+#include <thread>
 
 #include <afina/network/Server.h>
 
@@ -41,7 +42,6 @@ protected:
     void OnRun();
 
 private:
-
     void worker(int client_socket);
 
     // Logger instance
@@ -53,14 +53,14 @@ private:
     std::atomic<bool> running;
 
     // Server socket to accept connections on
-    int _server_socket;
+    int _server_socket = 0;
 
     // Thread to run network on
     std::thread _thread;
 
     std::atomic<int> number_of_workers;
 
-    uint32_t max_workers;
+    uint32_t max_workers = 0;
 
     std::mutex socket_mutex;
     std::set<int> sockets;
