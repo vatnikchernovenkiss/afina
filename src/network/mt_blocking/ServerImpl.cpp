@@ -83,7 +83,6 @@ void ServerImpl::Start(uint16_t port, uint32_t n_accept, uint32_t n_workers) {
 // See Server.h
 void ServerImpl::Stop() {
     std::lock_guard<std::mutex> lock(socket_mutex);
-    executor.Stop(true);
     running.store(false);
     shutdown(_server_socket, SHUT_RDWR);
     for (auto socket : sockets) {
@@ -95,6 +94,7 @@ void ServerImpl::Stop() {
 void ServerImpl::Join() {
     assert(_thread.joinable());
     _thread.join();
+    executor.Stop(true);
 }
 
 // See Server.h
@@ -131,8 +131,14 @@ void ServerImpl::OnRun() {
         }
 
         // TODO: Start new thread and process data from/to connection
+        {
+            std::lock_guard<std::mutex> lock(socket_mutex);
+            sockets.insert(client_socket);
+        }
         if (!executor.Execute(&ServerImpl::worker, this, client_socket)) {
             close(client_socket);
+            std::lock_guard<std::mutex> lock(socket_mutex);
+            sockets.erase(client_socket);
         }
     }
 
