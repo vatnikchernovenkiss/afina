@@ -5,48 +5,47 @@ namespace Afina {
 namespace Concurrency {
 
 void process(Executor *executor) {
-    std::function<void()> current_task;
-    bool busy = false;
-    executor->free_threads++;
-    while (true) {
-        if (executor->state != Executor::State::kRun) {
-            executor->free_threads--;
-            break;
+    try {
+        std::function<void()> current_task;
+        bool busy = false;
+        executor->free_threads++;
+        while (true) {
+            if (executor->state != Executor::State::kRun) {
+                executor->free_threads--;
+                break;
+            }
+            std::unique_lock<std::mutex> lock(executor->mutex);
+            auto time_limit = std::chrono::system_clock::now() + std::chrono::milliseconds(executor->idle_time);
+            if (executor->empty_condition.wait_until(lock, time_limit, [&]() { return !executor->tasks.empty(); })) {
+                current_task = executor->tasks.front();
+                executor->tasks.pop_front();
+                busy = true;
+                executor->free_threads--;
+            } else {
+                executor->free_threads--;
+                if (executor->number_of_threads > executor->low_watermark) {
+                    break;
+                } else {
+                    busy = false;
+                }
+            }
+            if (busy) {
+                current_task();
+                busy = false;
+                executor->free_threads++;
+            }
         }
         std::unique_lock<std::mutex> lock(executor->mutex);
-        auto time_limit = std::chrono::system_clock::now() + std::chrono::milliseconds(executor->idle_time);
-        if (executor->empty_condition.wait_until(lock, time_limit, [&]() { return !executor->tasks.empty(); }) &&
-            std::chrono::system_clock::now() < time_limit) {
-            current_task = executor->tasks.front();
-            executor->tasks.pop_front();
-            busy = true;
-            executor->free_threads--;
-        } else {
-            executor->free_threads--;
-            if (executor->number_of_threads > executor->low_watermark) {
-                break;
-            } else {
-                busy = false;
-            }
+        executor->number_of_threads--;
+        if (executor->state == Executor::State::kStopping && executor->tasks.empty() &&
+            executor->number_of_threads == 0) {
+            executor->state = Executor::State::kStopped;
+            executor->stop_work.notify_all();
         }
-        if (busy) {
-            try {
-                current_task();
-            } catch (...) {
-                std::terminate();
-            }
-            busy = false;
-            executor->free_threads++;
-        }
-    }
-    std::unique_lock<std::mutex> lock(executor->mutex);
-    executor->number_of_threads--;
-    if (executor->state == Executor::State::kStopping && executor->tasks.empty()) {
-        executor->state = Executor::State::kStopped;
-        executor->stop_work.notify_all();
+    } catch (std::exception &ex) {
+        std::terminate();
     }
 }
-
 void Executor::Stop(bool await) {
     std::unique_lock<std::mutex> lock(end_mutex);
     if (state == State::kRun) {
