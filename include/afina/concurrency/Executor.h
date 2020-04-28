@@ -56,15 +56,16 @@ public:
      * execution finished by itself
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args) {
-        if (state != State::kRun || tasks.size() >= max_queue_size) {
-            return false;
-        }
+
         // Prepare "task"
         auto to_exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
         std::lock_guard<std::mutex> lock(mutex);
 
         // Enqueue new task
+        if (state != State::kRun || tasks.size() >= max_queue_size) {
+            return false;
+        }
         tasks.push_back(to_exec);
         if (free_threads == 0 && number_of_threads < hight_watermark) {
             number_of_threads++;
@@ -118,7 +119,7 @@ private:
     int hight_watermark = 0;
     int max_queue_size = 0;
     int idle_time = 0;
-    int free_threads = 0;
+    std::atomic<int> free_threads;
     int number_of_threads = 0;
 
     std::condition_variable stop_work;
