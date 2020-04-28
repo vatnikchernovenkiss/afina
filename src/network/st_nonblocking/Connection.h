@@ -38,16 +38,16 @@ private:
 
     int _socket;
     struct epoll_event _event;
-
+    char client_buffer[4096] = {0};
     std::shared_ptr<spdlog::logger> _logger;
     std::shared_ptr<Afina::Storage> pStorage;
     std::unique_ptr<Execute::Command> command_to_execute;
     Protocol::Parser parser;
-    std::size_t arg_remains;
+    std::size_t arg_remains = 0;
     std::string argument_for_command;
     std::vector<std::string> replies;
     int current_bytes = 0;
-
+    bool no_read = false;
     int rest = 0;
 };
 

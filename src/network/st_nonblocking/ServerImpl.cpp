@@ -96,6 +96,7 @@ void ServerImpl::Stop() {
         close(connection->_socket);
         delete connection;
     }
+    shutdown(_server_socket, SHUT_RDWR);
     close(_server_socket);
 }
 
