@@ -1,8 +1,8 @@
 #include "Connection.h"
 
 #include <iostream>
+#include <string>
 #include <sys/uio.h>
-
 namespace Afina {
 namespace Network {
 namespace STnonblock {
@@ -86,20 +86,17 @@ void Connection::DoRead() {
                 }
             }
         } // while (read_count)
-        no_read = true;
         if (current_bytes == 0) {
-            _logger->debug("Connection closed");
+            _logger->debug("End reading");
         } else {
             throw std::runtime_error("Error on reading");
         }
     } catch (std::runtime_error &ex) {
-        _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-        replies.push_back("ERROR!Failed to process connection.\r\n");
-        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLOUT;
-        no_read = true;
+        OnError();
+        std::string ErrorReply("ERROR!Failed to process connection.\r\n");
+        write(_socket, ErrorReply.data(), ErrorReply.size());
     }
 }
-
 // See Connection.h
 void Connection::DoWrite() {
     try {
@@ -126,13 +123,11 @@ void Connection::DoWrite() {
         replies.erase(replies.begin(), replies.begin() + i);
         if (replies.empty()) {
             _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
-            if (no_read) {
-                is_Alive = false;
-            }
+            is_Alive = false;
         }
     } catch (std::runtime_error &ex) {
-        is_Alive = false;
-        _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
+        _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
+        OnError();
     }
 }
 

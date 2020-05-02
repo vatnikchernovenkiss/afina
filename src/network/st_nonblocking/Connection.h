@@ -47,7 +47,6 @@ private:
     std::string argument_for_command;
     std::vector<std::string> replies;
     int current_bytes = 0;
-    bool no_read = false;
     int rest = 0;
 };
 
