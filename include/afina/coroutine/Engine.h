@@ -179,6 +179,7 @@ public:
             pc->prev = pc->next = nullptr;
             delete std::get<0>(pc->Stack);
             delete pc;
+	    pc = nullptr;
             // We cannot return here, as this function "returned" once already, so here we must select some other
             // coroutine to run. As current coroutine is completed and can't be scheduled anymore, it is safe to
             // just give up and ask scheduler code to select someone else, control will never returns to this one
