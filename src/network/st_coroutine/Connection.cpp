@@ -1,133 +1,159 @@
 #include "Connection.h"
-
+#include <afina/coroutine/Engine.h>
 #include <afina/execute/Command.h>
 #include <iostream>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 namespace Afina {
 namespace Network {
 namespace STcoroutine {
 
+// See Connection.h
 void Connection::Start() {
-    _logger->debug("Connection on {} socket started", _socket);
+    _logger->debug("Start {} socket", _socket);
+    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
     _event.data.fd = _socket;
     _event.data.ptr = this;
-    _event.events = EPOLLIN | EPOLLHUP | EPOLLERR;
-    _is_alive = true;
 }
 
 // See Connection.h
 void Connection::OnError() {
-    _logger->warn("Connection on {} socket has error", _socket);
-    _is_alive = false;
+    _logger->debug("Error on {} socket", _socket);
+    is_Alive = false;
 }
 
 // See Connection.h
 void Connection::OnClose() {
-    _logger->debug("Connection on {} socket closed", _socket);
-    _is_alive = false;
+    _logger->debug("Close {} socket", _socket);
+    is_Alive = false;
 }
 
 // See Connection.h
-void Connection::DoReadWrite(Afina::Coroutine::Engine &engine) {
-    _logger->debug("Do read on {} socket", _socket);//while(1){
-    char _read_buffer[4096];
-    size_t _read_bytes = 0;
-    std::size_t _arg_remains = 0;
-    Protocol::Parser _parser;
-    std::string _argument_for_command;
-    std::unique_ptr<Execute::Command> _command_to_execute;
-
+void Connection::DoRead() {
+    _logger->debug("Do read on {} socket", _socket);
     try {
-        int read_count = -1;
-        while ((read_count = read(_socket, _read_buffer + _read_bytes, sizeof(_read_buffer) - _read_bytes)) > 0) {
-            _read_bytes += read_count;
+        int read_count = 0;
+        while ((read_count = read(_socket, client_buffer + current_bytes, sizeof(client_buffer) - current_bytes)) > 0) {
+            current_bytes += read_count;
             _logger->debug("Got {} bytes from socket", read_count);
-
-            while (_read_bytes > 0) {
-
-                _logger->debug("Process {} bytes", _read_bytes);
+            while (current_bytes > 0) {
+                _logger->debug("Process {} bytes", current_bytes);
                 // There is no command yet
-                if (!_command_to_execute) {
+                if (!command_to_execute) {
                     std::size_t parsed = 0;
-                    try {
-                        if (_parser.Parse(_read_buffer, _read_bytes, parsed)) {
-                            // There is no command to be launched, continue to parse input stream
-                            // Here we are, current chunk finished some command, process it
-                            _logger->debug("Found new command: {} in {} bytes", _parser.Name(), parsed);
-                            _command_to_execute = _parser.Build(_arg_remains);
-                            if (_arg_remains > 0) {
-                                _arg_remains += 2;
-                            }
+                    if (parser.Parse(client_buffer, current_bytes, parsed)) {
+                        // There is no command to be launched, continue to parse input stream
+                        // Here we are, current chunk finished some command, process it
+                        _logger->debug("Found new command: {} in {} bytes", parser.Name(), parsed);
+                        command_to_execute = parser.Build(arg_remains);
+                        if (arg_remains > 0) {
+                            arg_remains += 2;
                         }
-                    } catch (std::runtime_error &ex) {
-                        _event.events |= EPOLLOUT;
-                        throw std::runtime_error(ex.what());
                     }
-
                     // Parsed might fails to consume any bytes from input stream. In real life that could happens,
                     // for example, because we are working with UTF-16 chars and only 1 byte left in stream
                     if (parsed == 0) {
                         break;
                     } else {
-                        std::memmove(_read_buffer, _read_buffer + parsed, _read_bytes - parsed);
-                        _read_bytes -= parsed;
+                        std::memmove(client_buffer, client_buffer + parsed, current_bytes - parsed);
+                        current_bytes -= parsed;
                     }
                 }
-
                 // There is command, but we still wait for argument to arrive...
-                if (_command_to_execute && _arg_remains > 0) {
-                    _logger->debug("Fill argument: {} bytes of {}", _read_bytes, _arg_remains);
+                if (command_to_execute && arg_remains > 0) {
+                    _logger->debug("Fill argument: {} bytes of {}", current_bytes, arg_remains);
                     // There is some parsed command, and now we are reading argument
-                    std::size_t to_read = std::min(_arg_remains, std::size_t(_read_bytes));
-                    _argument_for_command.append(_read_buffer, to_read);
-
-                    std::memmove(_read_buffer, _read_buffer + to_read, _read_bytes - to_read);
-                    _arg_remains -= to_read;
-                    _read_bytes -= to_read;
+                    std::size_t to_read = std::min(arg_remains, std::size_t(current_bytes));
+                    argument_for_command.append(client_buffer, to_read - 2 * (to_read == arg_remains));
+                    std::memmove(client_buffer, client_buffer + to_read, current_bytes - to_read);
+                    arg_remains -= to_read;
+                    current_bytes -= to_read;
                 }
                 // There is command & argument - RUN!
-                if (_command_to_execute && _arg_remains == 0) {
+                if (command_to_execute && arg_remains == 0) {
                     _logger->debug("Start command execution");
-
                     std::string result;
-                    _command_to_execute->Execute(*_pStorage, _argument_for_command, result);
-
+                    command_to_execute->Execute(*pStorage, argument_for_command, result);
                     // Send response
                     result += "\r\n";
-
-                    _event.events |= EPOLLOUT;
-            //       engine.yield();
-
-                    if (send(_socket, result.data(), result.size(), 0) <= 0) {
-                        throw std::runtime_error("Failed to send response");
+                    replies.push_back(result);
+                    if (replies.size() == 1) {
+                        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLOUT;
                     }
                     // Prepare for the next command
-                    _command_to_execute.reset();
-                    _argument_for_command.resize(0);
-                    _parser.Reset();
-                 //  engine.yield();
+                    command_to_execute.reset();
+                    argument_for_command.resize(0);
+                    parser.Reset();
                 }
             }
-        } // while (read_count)
-        if (read_count == 0) {
-            _logger->debug("Connection closed");
-           // _is_alive = false;
-           // _is_alive = false;
-               // close(_socket);
-
+        }               // while (read_count)
+        no_read = true; //зачем?
+        if (current_bytes == 0) {
+            // _logger->debug("Evereything read");
         } else {
-            throw std::runtime_error(std::string(strerror(errno)));
+            throw std::runtime_error("Error on reading");
         }
     } catch (std::runtime_error &ex) {
         _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
-      //  _is_alive = false;
-                        //close(_socket);
-
-    }//}
+        replies.push_back("ERROR!Failed to process connection.\r\n");
+        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLOUT;
+        no_read = true;
+    }
 }
 
+// See Connection.h
+void Connection::DoWrite() {
+    try {
+        if (replies.empty()) {
+            return;
+        }
+        _logger->debug("Write on {} socket", _socket);
+        struct iovec messages[replies.size()];
+        messages[0].iov_len = replies[0].size() - rest;
+        messages[0].iov_base = &(replies[0][0]) + rest;
+        for (int i = 1; i < replies.size(); i++) {
+            messages[i].iov_len = replies[i].size();
+            messages[i].iov_base = &(replies[i][0]);
+        }
+        int written;
+        if ((written = writev(_socket, messages, replies.size())) < 0) {
+            throw std::runtime_error("Failed to response");
+        }
+        rest += written;
+        int i = 0;
+        for (; !(i >= replies.size() || (rest - messages[i].iov_len) < 0); i++) {
+            rest -= messages[i].iov_len;
+        }
+        replies.erase(replies.begin(), replies.begin() + i);
+        if (replies.empty()) {
+            _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
+            if (no_read) {
+                is_Alive = false;
+            }
+        }
+    } catch (std::runtime_error &ex) {
+        is_Alive = false;
+        _logger->error("Failed to process connection on descriptor {}: {}", _socket, ex.what());
+    }
+}
+
+void Connection::superfun(Afina::Coroutine::Engine &engine) {
+    while (is_Alive) {
+        //Этот порядок очень важен
+        if (_event.events & EPOLLOUT && replies.size()) {
+            DoWrite();
+            engine.sched(maini);
+            continue;
+        } else if (_event.events & EPOLLIN) {
+            DoRead();
+            engine.sched(maini);
+        } else {
+            is_Alive = false;
+        }
+    }
+}
 } // namespace STcoroutine
 } // namespace Network
 } // namespace Afina

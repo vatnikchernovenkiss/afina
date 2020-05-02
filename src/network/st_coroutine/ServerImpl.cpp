@@ -26,8 +26,8 @@ namespace Network {
 namespace STcoroutine {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl),
-                                                                                                   _ctx(nullptr) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl)
+    : Server(ps, pl), _ctx(nullptr) {}
 
 // See Server.h
 ServerImpl::~ServerImpl() {}
@@ -77,13 +77,13 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
         throw std::runtime_error("Failed to create epoll file descriptor: " + std::string(strerror(errno)));
     }
 
-    _work_thread = std::thread([this]{ this->_engine.start(static_cast<void(*)(ServerImpl *)>([](ServerImpl *s){ s->OnRun(); }), this); });
+    _work_thread = std::thread(
+        [this] { this->_engine.start(static_cast<void (*)(ServerImpl *)>([](ServerImpl *s) { s->OnRun(); }), this); });
 }
 
 // See Server.h
 void ServerImpl::Stop() {
     _logger->warn("Stop network service");
-
 
     // Wakeup threads that are sleep on epoll_wait
     if (eventfd_write(_event_fd, 1)) {
@@ -130,8 +130,6 @@ void ServerImpl::OnRun() {
             struct epoll_event &current_event = mod_list[i];
             if (current_event.data.fd == _event_fd) {
                 _logger->debug("Break acceptor due to stop signal");
-            //    _engine.unblock_all();
-              //  _engine.block(_ctx);
                 run = false;
                 continue;
             } else if (current_event.data.fd == _server_socket) {
@@ -150,12 +148,7 @@ void ServerImpl::OnRun() {
             } else {
                 // Depends on what connection wants...
                 if (current_event.events & EPOLLIN || current_event.events & EPOLLOUT) {
-                    //_engine.unblock(pc->_ctx);
-                  //  _engine.block(_ctx);
-                  _engine.sched(pc->_ctx);continue;
-                }
-                if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
-                    _logger->error("Failed to delete connection from epoll");
+                    _engine.sched(pc->_ctx);
                 }
             }
 
@@ -167,7 +160,6 @@ void ServerImpl::OnRun() {
                 close(pc->_socket);
                 pc->OnClose();
 
-                delete pc;
             } else if (pc->_event.events != old_mask) {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_MOD, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to change connection event mask");
@@ -210,31 +202,27 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
         }
 
         // Register the new FD to be monitored by epoll.
-        Connection *pc = new(std::nothrow) Connection(infd, pStorage, _logger);
+        Connection *pc = new (std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
 
         // Register connection in worker's epoll
         pc->Start();
-        pc->_ctx = static_cast<Afina::Coroutine::Engine::context *>(_engine.run(static_cast<void(*)(Connection *, Afina::Coroutine::Engine &)>
-                                                                                ([](Connection *pc, Afina::Coroutine::Engine &engine) { pc->DoReadWrite(engine); }), (Connection *) pc, _engine));
+        pc->_ctx = static_cast<Afina::Coroutine::Engine::context *>(
+            _engine.run(static_cast<void (*)(Connection *, Afina::Coroutine::Engine &)>(
+                            [](Connection *pc, Afina::Coroutine::Engine &engine) { pc->superfun(engine); }),
+                        (Connection *)pc, _engine));
+        pc->maini = _engine.get_cur_routine();
+
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
                 pc->OnError();
                 delete pc;
             }
-                    _engine.yield();
-
         }
     }
 }
-
-/*void ServerImpl::unblocker() {
-    _logger->debug("Unblocker running");
-    _engine.unblock(_ctx);
-    _engine.yield();
-}*/
 
 } // namespace STcoroutine
 } // namespace Network
