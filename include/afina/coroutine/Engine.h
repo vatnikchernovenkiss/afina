@@ -19,8 +19,6 @@ namespace Coroutine {
  */
 class Engine final {
 public:
-    using unblocker_func = std::function<void()>;
-
     /**
      * A single coroutine instance which could be scheduled for execution
      * should be allocated on heap
@@ -38,9 +36,6 @@ public:
 
         // Saved coroutine context (registers)
         jmp_buf Environment;
-
-        // is coroutine in blocked list
-        bool isBlocked = false;
 
         // To include routine in the different lists, such as "alive", "blocked", e.t.c
         struct context *prev = nullptr;
@@ -64,19 +59,9 @@ private:
     context *alive;
 
     /**
-     * List of coroutines that sleep and can't be executed
-     */
-    context *blocked;
-
-    /**
      * Context to be returned finally
      */
     context *idle_ctx;
-
-    /**
-     * Call when all coroutines are blocked
-     */
-    unblocker_func _unblocker;
 
 protected:
     /**
@@ -89,24 +74,15 @@ protected:
      */
     void Restore(context &ctx);
 
-    static void null_unblocker() {}
+    void Enter(context &ctx);
 
 public:
-    explicit Engine(unblocker_func unblocker = null_unblocker)
-        : StackBottom(nullptr), cur_routine(nullptr), alive(nullptr), _unblocker(std::move(unblocker)),
-          blocked(nullptr), idle_ctx(nullptr) {}
+    Engine() : StackBottom(0), cur_routine(nullptr), alive(nullptr) {}
+
     Engine(Engine &&) = delete;
     Engine(const Engine &) = delete;
 
-    void unblock_all() {
-        for (auto coro = blocked; coro != nullptr; coro = blocked) {
-            unblock(coro);
-        }
-    }
-
-    context *get_cur_routine() {
-        return cur_routine;
-    }
+    context *get_cur_routine() { return cur_routine; }
 
     /**
      * Gives up current routine execution and let engine to schedule other one. It is not defined when
@@ -128,19 +104,6 @@ public:
     void sched(void *routine);
 
     /**
-     * Blocks current routine so that is can't be scheduled anymore
-     * If it was a currently running coroutine, then do yield to select new one to be run instead.
-     *
-     * If argument is nullptr then block current coroutine
-     */
-    void block(void *coro = nullptr);
-
-    /**
-     * Put coroutine back to list of alive, so that it could be scheduled later
-     */
-    void unblock(void *coro);
-
-    /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
      * considered as main.
      *
@@ -159,9 +122,6 @@ public:
         void *pc = run(main, std::forward<Ta>(args)...);
         idle_ctx = new context();
         if (setjmp(idle_ctx->Environment) > 0) {
-            if (alive == nullptr) {
-                _unblocker();
-            }
             cur_routine = idle_ctx;
 
             // Here: correct finish of the coroutine section
