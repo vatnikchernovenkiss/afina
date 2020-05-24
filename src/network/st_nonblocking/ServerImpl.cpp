@@ -92,10 +92,7 @@ void ServerImpl::Stop() {
     if (eventfd_write(_event_fd, 1)) {
         throw std::runtime_error("Failed to wakeup workers");
     }
-    for (auto connection : connections) {
-        close(connection->_socket);
-        delete connection;
-    }
+   
     shutdown(_server_socket, SHUT_RDWR);
     close(_server_socket);
 }
@@ -188,6 +185,10 @@ void ServerImpl::OnRun() {
         }
     }
     _logger->warn("Acceptor stopped");
+     for (auto connection : connections) {
+        close(connection->_socket);
+        delete connection;
+    }
 }
 
 void ServerImpl::OnNewConnection(int epoll_descr) {
