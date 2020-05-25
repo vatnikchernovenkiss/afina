@@ -60,7 +60,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
     }
 
     int opts = 1;
-    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1) {
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_REUSEADDR), &opts, sizeof(opts)) == -1) {
         close(_server_socket);
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
@@ -96,7 +96,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
 
     _workers.reserve(n_workers);
     for (int i = 0; i < n_workers; i++) {
-        _workers.emplace_back(pStorage, pLogging);
+        _workers.emplace_back(pStorage, pLogging, this);
         _workers.back().Start(_data_epoll_fd);
     }
 
@@ -120,21 +120,28 @@ void ServerImpl::Stop() {
         throw std::runtime_error("Failed to wakeup workers");
     }
     shutdown(_server_socket, SHUT_RDWR);
+    for (auto connection : connections) {
+        shutdown(connection->_socket, SHUT_RD);
+    }
 }
 
 // See Server.h
 void ServerImpl::Join() {
+	std::lock_guard<std::mutex> lock(mutex);
     for (auto &t : _acceptors) {
         t.join();
     }
-
+	_acceptors.clear();
     for (auto &w : _workers) {
         w.Join();
     }
-    std::lock_guard<std::mutex> lock(mutex);
+    _workers.clear();
     for (auto connection : connections) {
         close(connection->_socket);
+        delete connection;
     }
+    connections.clear();
+    close(_server_socket);
 }
 
 // See ServerImpl.h
@@ -213,10 +220,12 @@ void ServerImpl::OnRun() {
                                        epoll_ctl_retval);
                         pc->OnError();
                         close(pc->_socket);
+                        std::lock_guard<std::mutex> lock(mutex);
+                        connections.erase(pc);
                         delete pc;
                     } else {
                         std::lock_guard<std::mutex> lock(mutex);
-                        connections.insert(pc);
+                        connections.emplace(pc);
                     }
                 }
             }

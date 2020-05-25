@@ -1,4 +1,3 @@
-
 #include "Connection.h"
 
 #include <iostream>
@@ -11,27 +10,34 @@ namespace MTnonblock {
 // See Connection.h
 void Connection::Start() {
     _logger->debug("Start {} socket", _socket);
-    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET;
+    _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
     _event.data.fd = _socket;
     _event.data.ptr = this;
+    command_to_execute.reset();
+    argument_for_command.resize(0);
+    parser.Reset();
+    arg_remains = 0;
+    rest = 0;
+    current_bytes = 0;
+    replies.clear();
 }
 
 // See Connection.h
 void Connection::OnError() {
     _logger->debug("Error on {} socket", _socket);
-    is_Alive.store(false);
+    is_Alive.store(false, std::memory_order_relaxed);
 }
 
 // See Connection.h
 void Connection::OnClose() {
     _logger->debug("Close {} socket", _socket);
-    is_Alive.store(false);
+    is_Alive.store(false, std::memory_order_relaxed);
 }
 
 // See Connection.h
 void Connection::DoRead() {
-    std::lock_guard<std::mutex> lock(mutex);
-    _logger->debug("Do read on {} socket", _socket);
+	std::atomic_thread_fence(std::memory_order_acquire);
+     _logger->debug("Do read on {} socket", _socket);
     try {
         int read_count = 0;
         while ((read_count = read(_socket, client_buffer + current_bytes, sizeof(client_buffer) - current_bytes)) > 0) {
@@ -79,7 +85,7 @@ void Connection::DoRead() {
                     result += "\r\n";
                     replies.push_back(result);
                     if (replies.size() == 1) {
-                        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLOUT | EPOLLET;
+                        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLOUT;
                     }
                     // Prepare for the next command
                     command_to_execute.reset();
@@ -90,19 +96,28 @@ void Connection::DoRead() {
         } // while (read_count)
         if (current_bytes == 0) {
             _logger->debug("End reading");
+            data_changed.store(true, std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
         } else {
-            throw std::runtime_error("Error on reading");
+			if (!(errno ==  EAGAIN || errno == EINTR)) {
+				throw std::runtime_error("Failed to response");
+			}
         }
     } catch (std::runtime_error &ex) {
         OnError();
         std::string ErrorReply("ERROR!Failed to process connection.\r\n");
         write(_socket, ErrorReply.data(), ErrorReply.size());
+        data_changed.store(true, std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_release);
     }
 }
 
 // See Connection.h
 void Connection::DoWrite() {
-    std::lock_guard<std::mutex> lock(mutex);
+	std::atomic_thread_fence(std::memory_order_acquire);
+    if (!data_changed.load(std::memory_order_relaxed)) {
+        return;
+    }
     try {
         if (replies.empty()) {
             return;
@@ -117,7 +132,12 @@ void Connection::DoWrite() {
         }
         int written;
         if ((written = writev(_socket, messages, replies.size())) <= 0) {
-            throw std::runtime_error("Failed to response");
+			if (!(errno ==  EAGAIN || errno == EINTR)) {
+				throw std::runtime_error("Failed to response");
+			} else {
+				std::atomic_thread_fence(std::menory_order_release);
+				return;
+			}
         }
         rest += written;
         int i = 0;
@@ -126,12 +146,14 @@ void Connection::DoWrite() {
         }
         replies.erase(replies.begin(), replies.begin() + i);
         if (replies.empty()) {
-            _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR | EPOLLET;
-            is_Alive.store(false);
+            _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
+            is_Alive = false;
         }
+        std::atomic_thread_fence(std::memory_order_release);
     } catch (std::runtime_error &ex) {
-        _event.events = EPOLLIN | EPOLLHUP | EPOLLERR | EPOLLET;
+        _event.events = EPOLLIN | EPOLLRDHUP | EPOLLERR;
         OnError();
+        std::atomic_thread_fence(std::memory_order_release);
     }
 }
 

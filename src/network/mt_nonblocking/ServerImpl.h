@@ -37,6 +37,7 @@ public:
 
     // See Server.h
     void Join() override;
+    void RemoveConnection(Connection*);
 
 protected:
     void OnRun();
@@ -44,6 +45,7 @@ protected:
 
 private:
     // logger to use
+    friend class Worker;
     std::shared_ptr<spdlog::logger> _logger;
 
     // Port to listen for new connections, permits access only from
@@ -68,7 +70,6 @@ private:
     std::vector<Worker> _workers;
 
     std::unordered_set<Connection *> connections;
-
     std::mutex mutex;
 };
 
