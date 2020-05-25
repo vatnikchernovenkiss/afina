@@ -135,7 +135,7 @@ void Connection::DoWrite() {
             if (!(errno == EAGAIN || errno == EINTR)) {
                 throw std::runtime_error("Failed to response");
             } else {
-                std::atomic_thread_fence(std::menory_order_release);
+                std::atomic_thread_fence(std::memory_order_release);
                 return;
             }
         }
