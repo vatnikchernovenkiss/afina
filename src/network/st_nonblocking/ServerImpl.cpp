@@ -60,7 +60,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
     }
 
     int opts = 1;
-    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1) {
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_REUSEADDR), &opts, sizeof(opts)) == -1) {
         close(_server_socket);
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
@@ -92,7 +92,7 @@ void ServerImpl::Stop() {
     if (eventfd_write(_event_fd, 1)) {
         throw std::runtime_error("Failed to wakeup workers");
     }
-   
+
     shutdown(_server_socket, SHUT_RDWR);
     close(_server_socket);
 }
@@ -185,7 +185,7 @@ void ServerImpl::OnRun() {
         }
     }
     _logger->warn("Acceptor stopped");
-     for (auto connection : connections) {
+    for (auto connection : connections) {
         close(connection->_socket);
         delete connection;
     }

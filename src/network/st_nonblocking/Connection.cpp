@@ -89,9 +89,9 @@ void Connection::DoRead() {
         if (current_bytes == 0) {
             _logger->debug("End reading");
         } else {
-			if (!(errno ==  EAGAIN || errno == EINTR)) {
-				throw std::runtime_error("Failed to response");
-			} 
+            if (!(errno == EAGAIN || errno == EINTR)) {
+                throw std::runtime_error("Failed to response");
+            }
         }
     } catch (std::runtime_error &ex) {
         OnError();
@@ -115,11 +115,11 @@ void Connection::DoWrite() {
         }
         int written;
         if ((written = writev(_socket, messages, replies.size())) <= 0) {
-			if (!(errno ==  EAGAIN || errno == EINTR)) {
-				throw std::runtime_error("Failed to response");
-			} else {
-				return;
-			}
+            if (!(errno == EAGAIN || errno == EINTR)) {
+                throw std::runtime_error("Failed to response");
+            } else {
+                return;
+            }
         }
         rest += written;
         int i = 0;
