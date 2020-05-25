@@ -37,7 +37,7 @@ public:
 
     // See Server.h
     void Join() override;
-    void RemoveConnection(Connection*);
+    void RemoveConnection(Connection *);
 
 protected:
     void OnRun();

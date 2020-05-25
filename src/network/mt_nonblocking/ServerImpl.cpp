@@ -127,11 +127,11 @@ void ServerImpl::Stop() {
 
 // See Server.h
 void ServerImpl::Join() {
-	std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::mutex> lock(mutex);
     for (auto &t : _acceptors) {
         t.join();
     }
-	_acceptors.clear();
+    _acceptors.clear();
     for (auto &w : _workers) {
         w.Join();
     }

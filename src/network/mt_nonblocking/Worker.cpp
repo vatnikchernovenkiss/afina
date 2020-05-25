@@ -1,10 +1,10 @@
 
 #include "Worker.h"
 
+#include "ServerImpl.h"
 #include <cassert>
 #include <functional>
 #include <iostream>
-#include "ServerImpl.h"
 
 #include <netdb.h>
 #include <sys/epoll.h>
@@ -121,8 +121,8 @@ void Worker::OnRun() {
                     pconn->OnError();
                     close(pconn->_socket);
                     std::lock_guard<std::mutex> lock(server->mutex);
-					server->connections.erase(pconn);
-					delete pconn;
+                    server->connections.erase(pconn);
+                    delete pconn;
                 }
             }
             // Or delete closed one

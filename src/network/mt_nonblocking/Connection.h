@@ -19,7 +19,7 @@ public:
         std::memset(&_event, 0, sizeof(struct epoll_event));
         _event.data.ptr = this;
         is_Alive.store(true, std::memory_order_relaxed);
-	data_changed.store(false, std::memory_order_relaxed);
+        data_changed.store(false, std::memory_order_relaxed);
     }
 
     inline bool isAlive() const { return is_Alive.load(std::memory_order_relaxed); }
@@ -49,7 +49,7 @@ private:
     std::vector<std::string> replies;
     int current_bytes = 0;
     int rest = 0;
-    std::atomic<bool>  data_changed;
+    std::atomic<bool> data_changed;
 };
 
 } // namespace MTnonblock

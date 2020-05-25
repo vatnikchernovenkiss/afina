@@ -36,8 +36,8 @@ void Connection::OnClose() {
 
 // See Connection.h
 void Connection::DoRead() {
-	std::atomic_thread_fence(std::memory_order_acquire);
-     _logger->debug("Do read on {} socket", _socket);
+    std::atomic_thread_fence(std::memory_order_acquire);
+    _logger->debug("Do read on {} socket", _socket);
     try {
         int read_count = 0;
         while ((read_count = read(_socket, client_buffer + current_bytes, sizeof(client_buffer) - current_bytes)) > 0) {
@@ -99,9 +99,9 @@ void Connection::DoRead() {
             data_changed.store(true, std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
         } else {
-			if (!(errno ==  EAGAIN || errno == EINTR)) {
-				throw std::runtime_error("Failed to response");
-			}
+            if (!(errno == EAGAIN || errno == EINTR)) {
+                throw std::runtime_error("Failed to response");
+            }
         }
     } catch (std::runtime_error &ex) {
         OnError();
@@ -114,7 +114,7 @@ void Connection::DoRead() {
 
 // See Connection.h
 void Connection::DoWrite() {
-	std::atomic_thread_fence(std::memory_order_acquire);
+    std::atomic_thread_fence(std::memory_order_acquire);
     if (!data_changed.load(std::memory_order_relaxed)) {
         return;
     }
@@ -132,12 +132,12 @@ void Connection::DoWrite() {
         }
         int written;
         if ((written = writev(_socket, messages, replies.size())) <= 0) {
-			if (!(errno ==  EAGAIN || errno == EINTR)) {
-				throw std::runtime_error("Failed to response");
-			} else {
-				std::atomic_thread_fence(std::menory_order_release);
-				return;
-			}
+            if (!(errno == EAGAIN || errno == EINTR)) {
+                throw std::runtime_error("Failed to response");
+            } else {
+                std::atomic_thread_fence(std::menory_order_release);
+                return;
+            }
         }
         rest += written;
         int i = 0;
