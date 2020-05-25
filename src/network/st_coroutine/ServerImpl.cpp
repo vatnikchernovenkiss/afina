@@ -56,7 +56,7 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
     }
 
     int opts = 1;
-    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1) {
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_REUSEADDR), &opts, sizeof(opts)) == -1) {
         close(_server_socket);
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
@@ -157,12 +157,12 @@ void ServerImpl::OnRun() {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_DEL, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to delete connection from epoll");
                 }
-                if (pc->_ctx) {//если pc-_ctx не nullptr то корутина еще не окончена
-					_engine.sched(pc->_ctx);
-				}
+                if (pc->_ctx) {
+                    _engine.sched(pc->_ctx);
+                }
                 close(pc->_socket);
                 pc->OnClose();
-				delete pc;
+                delete pc;
             } else if (pc->_event.events != old_mask) {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_MOD, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to change connection event mask");
@@ -183,7 +183,6 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
     for (;;) {
         struct sockaddr in_addr;
         socklen_t in_len;
-
         // No need to make these sockets non blocking since accept4() takes care of it.
         in_len = sizeof in_addr;
         int infd = accept4(_server_socket, &in_addr, &in_len, SOCK_NONBLOCK | SOCK_CLOEXEC);
@@ -196,7 +195,6 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
             }
         }
 
-        // Print host and service info.
         char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
         int retval =
             getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
@@ -204,20 +202,16 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
             _logger->info("Accepted connection on descriptor {} (host={}, port={})\n", infd, hbuf, sbuf);
         }
 
-        // Register the new FD to be monitored by epoll.
         Connection *pc = new (std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
-
-        // Register connection in worker's epoll
         pc->Start();
         pc->_ctx = static_cast<Afina::Coroutine::Engine::context *>(
             _engine.run(static_cast<void (*)(Connection *, Afina::Coroutine::Engine &)>(
-                            [](Connection *pc, Afina::Coroutine::Engine &engine) { pc->superfun(engine); }),
+                            [](Connection *pc, Afina::Coroutine::Engine &engine) { pc->cor_fun(engine); }),
                         (Connection *)pc, _engine));
         pc->maini = _engine.get_cur_routine();
-
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
                 pc->OnError();

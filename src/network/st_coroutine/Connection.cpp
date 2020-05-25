@@ -88,10 +88,10 @@ void Connection::DoRead() {
                     parser.Reset();
                 }
             }
-        }               // while (read_count)
-        no_read = true; //зачем?
+        } // while (read_count)
+        no_read = true;
         if (current_bytes == 0) {
-            // _logger->debug("Evereything read");
+            _logger->debug("Evereything read");
         } else {
             throw std::runtime_error("Error on reading");
         }
@@ -139,9 +139,8 @@ void Connection::DoWrite() {
     }
 }
 
-void Connection::superfun(Afina::Coroutine::Engine &engine) {
+void Connection::cor_fun(Afina::Coroutine::Engine &engine) {
     while (is_Alive) {
-        //Этот порядок очень важен
         if (_event.events & EPOLLOUT && replies.size()) {
             DoWrite();
             engine.sched(maini);

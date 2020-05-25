@@ -32,7 +32,7 @@ protected:
     void OnClose();
     void DoRead();
     void DoWrite();
-    void superfun(Afina::Coroutine::Engine &engine);
+    void cor_fun(Afina::Coroutine::Engine &engine);
 
 private:
     friend class ServerImpl;
