@@ -10,7 +10,7 @@ namespace Coroutine {
 
 void Engine::Store(context &ctx) {
     char current_address;
-    ctx.Low = StackBottom; //ну на самом деле стек растет вниз и свап выглядит немного странно. Мб это для совместимости
+    ctx.Low = StackBottom;
     ctx.Hight = &current_address;
     if (ctx.Hight < ctx.Low) {
         std::swap(ctx.Hight, ctx.Low);
@@ -30,7 +30,7 @@ void Engine::Store(context &ctx) {
 
 void Engine::Restore(context &ctx) {
     char current_address;
-    if ((&current_address >= ctx.Low) && (&current_address < ctx.Hight)) { //не знаю, зачем это, но без этого падает
+    if ((&current_address >= ctx.Low) && (&current_address < ctx.Hight)) {
         Restore(ctx);
     }
 
