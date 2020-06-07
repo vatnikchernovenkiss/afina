@@ -1,3 +1,4 @@
+
 #include "ServerImpl.h"
 
 #include <cassert>
@@ -33,7 +34,14 @@ namespace MTnonblock {
 ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
 
 // See Server.h
-ServerImpl::~ServerImpl() {}
+ServerImpl::~ServerImpl() {
+    if (need_to_stop) {
+        Stop();
+    }
+    if (need_to_join) {
+        Join();
+    }
+}
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
@@ -61,6 +69,10 @@ void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) 
 
     int opts = 1;
     if (setsockopt(_server_socket, SOL_SOCKET, (SO_REUSEADDR), &opts, sizeof(opts)) == -1) {
+        close(_server_socket);
+        throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
+    }
+    if (setsockopt(_server_socket, SOL_SOCKET, (SO_KEEPALIVE), &opts, sizeof(opts)) == -1) {
         close(_server_socket);
         throw std::runtime_error("Socket setsockopt() failed: " + std::string(strerror(errno)));
     }
@@ -114,20 +126,20 @@ void ServerImpl::Stop() {
     for (auto &w : _workers) {
         w.Stop();
     }
-
     // Wakeup threads that are sleep on epoll_wait
     if (eventfd_write(_event_fd, 1)) {
         throw std::runtime_error("Failed to wakeup workers");
     }
     shutdown(_server_socket, SHUT_RDWR);
+    std::lock_guard<std::mutex> lock(mutex);
     for (auto connection : connections) {
         shutdown(connection->_socket, SHUT_RD);
     }
+    need_to_stop = false;
 }
 
 // See Server.h
 void ServerImpl::Join() {
-    std::lock_guard<std::mutex> lock(mutex);
     for (auto &t : _acceptors) {
         t.join();
     }
@@ -136,12 +148,14 @@ void ServerImpl::Join() {
         w.Join();
     }
     _workers.clear();
+    std::lock_guard<std::mutex> lock(mutex);
     for (auto connection : connections) {
         close(connection->_socket);
         delete connection;
     }
     connections.clear();
     close(_server_socket);
+    need_to_join = false;
 }
 
 // See ServerImpl.h
@@ -220,8 +234,6 @@ void ServerImpl::OnRun() {
                                        epoll_ctl_retval);
                         pc->OnError();
                         close(pc->_socket);
-                        std::lock_guard<std::mutex> lock(mutex);
-                        connections.erase(pc);
                         delete pc;
                     } else {
                         std::lock_guard<std::mutex> lock(mutex);
@@ -233,7 +245,12 @@ void ServerImpl::OnRun() {
     }
     _logger->warn("Acceptor stopped");
 }
-
+void ServerImpl::RemoveConnection(Connection *pconn) {
+    close(pconn->_socket);
+    std::lock_guard<std::mutex> lock(mutex);
+    connections.erase(pconn);
+    delete pconn;
+}
 } // namespace MTnonblock
 } // namespace Network
 } // namespace Afina

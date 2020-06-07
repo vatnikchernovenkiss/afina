@@ -96,8 +96,7 @@ void Connection::DoRead() {
         } // while (read_count)
         if (current_bytes == 0) {
             _logger->debug("End reading");
-            data_changed.store(true, std::memory_order_relaxed);
-            std::atomic_thread_fence(std::memory_order_release);
+            data_changed.store(true, std::memory_order_release);
         } else {
             if (!(errno == EAGAIN || errno == EINTR)) {
                 throw std::runtime_error("Failed to response");
@@ -107,15 +106,13 @@ void Connection::DoRead() {
         OnError();
         std::string ErrorReply("ERROR!Failed to process connection.\r\n");
         write(_socket, ErrorReply.data(), ErrorReply.size());
-        data_changed.store(true, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
+        data_changed.store(true, std::memory_order_release);
     }
 }
 
 // See Connection.h
 void Connection::DoWrite() {
-    std::atomic_thread_fence(std::memory_order_acquire);
-    if (!data_changed.load(std::memory_order_relaxed)) {
+    if (!data_changed.load(std::memory_order_acquire)) {
         return;
     }
     try {
