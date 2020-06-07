@@ -33,7 +33,14 @@ namespace STnonblock {
 ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps, std::shared_ptr<Logging::Service> pl) : Server(ps, pl) {}
 
 // See Server.h
-ServerImpl::~ServerImpl() {}
+ServerImpl::~ServerImpl() {
+	if (need_to_stop) {
+		Stop();
+	}
+	if (need_to_join) {
+		Join();
+	}
+}
 
 // See Server.h
 void ServerImpl::Start(uint16_t port, uint32_t n_acceptors, uint32_t n_workers) {
@@ -95,12 +102,14 @@ void ServerImpl::Stop() {
 
     shutdown(_server_socket, SHUT_RDWR);
     close(_server_socket);
+    need_to_stop = false;
 }
 
 // See Server.h
 void ServerImpl::Join() {
     // Wait for work to be complete
     _work_thread.join();
+     need_to_join = false;
 }
 
 // See ServerImpl.h

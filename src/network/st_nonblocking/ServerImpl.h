@@ -60,6 +60,8 @@ private:
     // IO thread
     std::thread _work_thread;
     std::unordered_set<Connection *> connections;
+    bool need_to_stop = true;
+    bool need_to_join = true;
 };
 
 } // namespace STnonblock
