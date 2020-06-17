@@ -47,7 +47,7 @@ private:
      * Where coroutines stack begins
      */
     char *StackBottom;
-
+    bool inverse = false;
     /**
      * Current coroutine
      */
@@ -113,14 +113,24 @@ public:
      * @param pointer to the main coroutine
      * @param arguments to be passed to the main coroutine
      */
+    bool direction_check(char *beg) {
+        char *test;
+        return test < beg;
+    }
     template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
         // To acquire stack begin, create variable on stack and remember its address
         char StackStartsHere;
+        void *test;
+        inverse = direction_check(&StackStartsHere);
         this->StackBottom = &StackStartsHere;
-
         // Start routine execution
         void *pc = run(main, std::forward<Ta>(args)...);
         idle_ctx = new context();
+        if (inverse) {
+            idle_ctx->Hight = &StackStartsHere;
+        } else {
+            idle_ctx->Low = &StackStartsHere;
+        }
         if (setjmp(idle_ctx->Environment) > 0) {
             cur_routine = idle_ctx;
 
@@ -128,6 +138,7 @@ public:
             yield();
         } else if (pc != nullptr) {
             Store(*idle_ctx);
+            cur_routine = idle_ctx;
             sched(pc);
         }
 
@@ -135,12 +146,15 @@ public:
         delete idle_ctx;
         this->StackBottom = nullptr;
     }
-
+    template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
+        char coroutine_start;
+        return _run(&coroutine_start, func, std::forward<Ta>(args)...);
+    }
     /**
      * Register new coroutine. It won't receive control until scheduled explicitly or implicitly. In case of some
      * errors function returns -1
      */
-    template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
+    template <typename... Ta> void *_run(char *bottom, void (*func)(Ta...), Ta &&... args) {
         if (this->StackBottom == nullptr) {
             // Engine wasn't initialized yet
             return nullptr;
@@ -148,6 +162,11 @@ public:
 
         // New coroutine context that carries around all information enough to call function
         auto *pc = new context();
+        if (inverse) {
+            pc->Hight = bottom;
+        } else {
+            pc->Low = bottom;
+        }
         // Store current state right here, i.e just before enter new coroutine, later, once it gets scheduled
         // execution starts here. Note that we have to acquire stack of the current function call to ensure
         // that function parameters will be passed along
@@ -179,7 +198,7 @@ public:
             pc->prev = pc->next = nullptr;
             delete std::get<0>(pc->Stack);
             delete pc;
-	    pc = nullptr;
+            pc = nullptr;
             // We cannot return here, as this function "returned" once already, so here we must select some other
             // coroutine to run. As current coroutine is completed and can't be scheduled anymore, it is safe to
             // just give up and ask scheduler code to select someone else, control will never returns to this one
@@ -198,6 +217,14 @@ public:
         }
 
         return pc;
+    }
+    ~Engine() {
+        while (alive) {
+            auto next = alive->next;
+            delete std::get<0>(alive->Stack);
+            delete alive;
+            alive = next;
+        }
     }
 };
 
