@@ -32,8 +32,10 @@ void Connection::OnClose() {
 
 // See Connection.h
 void Connection::DoRead() {
+
     _logger->debug("Do read on {} socket", _socket);
     try {
+
         int read_count = 0;
         while ((read_count = read(_socket, client_buffer + current_bytes, sizeof(client_buffer) - current_bytes)) > 0) {
             current_bytes += read_count;
@@ -141,6 +143,10 @@ void Connection::DoWrite() {
 
 void Connection::cor_fun(Afina::Coroutine::Engine &engine) {
     while (is_Alive) {
+        if (!not_yield) {
+            engine.sched(maini);
+        }
+        not_yield = false;
         if (_event.events & EPOLLOUT && replies.size()) {
             DoWrite();
             engine.sched(maini);

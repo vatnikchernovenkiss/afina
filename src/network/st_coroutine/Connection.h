@@ -54,6 +54,7 @@ private:
     int current_bytes = 0;
     bool no_read = false;
     int rest = 0;
+    bool not_yield = false;
 };
 } // namespace STcoroutine
 } // namespace Network

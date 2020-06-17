@@ -90,6 +90,9 @@ void ServerImpl::Stop() {
         throw std::runtime_error("Failed to wakeup workers");
     }
     close(_server_socket);
+    for (auto connection : connections) {
+        shutdown(connection->_socket, SHUT_RD);
+    }
 }
 
 // See Server.h
@@ -148,6 +151,7 @@ void ServerImpl::OnRun() {
             } else {
                 // Depends on what connection wants...
                 if (current_event.events & EPOLLIN || current_event.events & EPOLLOUT) {
+                    pc->not_yield = true;
                     _engine.sched(pc->_ctx);
                 }
             }
@@ -163,20 +167,29 @@ void ServerImpl::OnRun() {
                 close(pc->_socket);
                 pc->OnClose();
                 delete pc;
+                connections.erase(pc);
             } else if (pc->_event.events != old_mask) {
                 if (epoll_ctl(epoll_descr, EPOLL_CTL_MOD, pc->_socket, &pc->_event)) {
                     _logger->error("Failed to change connection event mask");
 
                     close(pc->_socket);
                     pc->OnClose();
-
                     delete pc;
+                    connections.erase(pc);
                 }
             }
         }
     }
     _logger->warn("Acceptor stopped");
     _ctx = nullptr;
+    for (auto connection : connections) {
+        connection->OnClose();
+        connection->not_yield = true;
+        _engine.sched(connection->_ctx);
+        close(connection->_socket);
+        delete connection;
+    }
+    connections.clear();
 }
 
 void ServerImpl::OnNewConnection(int epoll_descr) {
@@ -195,27 +208,29 @@ void ServerImpl::OnNewConnection(int epoll_descr) {
             }
         }
 
-        char hbuf[NI_MAXHOST], sbuf[NI_MAXSERV];
+        char hbuf[NI_MAXHOST] = "", sbuf[NI_MAXSERV] = "";
         int retval =
             getnameinfo(&in_addr, in_len, hbuf, sizeof hbuf, sbuf, sizeof sbuf, NI_NUMERICHOST | NI_NUMERICSERV);
         if (retval == 0) {
             _logger->info("Accepted connection on descriptor {} (host={}, port={})\n", infd, hbuf, sbuf);
         }
-
         Connection *pc = new (std::nothrow) Connection(infd, pStorage, _logger);
         if (pc == nullptr) {
             throw std::runtime_error("Failed to allocate connection");
         }
         pc->Start();
-        pc->_ctx = static_cast<Afina::Coroutine::Engine::context *>(
-            _engine.run(static_cast<void (*)(Connection *, Afina::Coroutine::Engine &)>(
-                            [](Connection *pc, Afina::Coroutine::Engine &engine) { pc->cor_fun(engine); }),
-                        (Connection *)pc, _engine));
         pc->maini = _engine.get_cur_routine();
+        pc->_ctx = static_cast<Afina::Coroutine::Engine::context *>(
+            _engine.run(static_cast<void (*)(Connection &, Afina::Coroutine::Engine &)>(
+                            [](Connection &pc, Afina::Coroutine::Engine &engine) { pc.cor_fun(engine); }),
+                        (Connection &)*pc, _engine));
+
         if (pc->isAlive()) {
             if (epoll_ctl(epoll_descr, EPOLL_CTL_ADD, pc->_socket, &pc->_event)) {
                 pc->OnError();
                 delete pc;
+            } else {
+                connections.insert(pc);
             }
         }
     }
