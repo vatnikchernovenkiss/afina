@@ -1,30 +1,31 @@
 
 #include <afina/coroutine/Engine.h>
 
+#include <cassert>
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
-
 namespace Afina {
 namespace Coroutine {
 
 void Engine::Store(context &ctx) {
     char current_address;
-    ctx.Low = StackBottom;
-    ctx.Hight = &current_address;
-    if (ctx.Hight < ctx.Low) {
-        std::swap(ctx.Hight, ctx.Low);
+    char *dest;
+    if (inverse) {
+        dest = ctx.Low = &current_address;
+    } else {
+        dest = ctx.Hight = &current_address;
     }
     auto &buf = std::get<0>(ctx.Stack);
     auto &size = std::get<1>(ctx.Stack);
     auto need_size = ctx.Hight - ctx.Low;
-
     if (size < need_size) {
         delete[] buf;
         buf = new char[need_size];
         size = need_size;
     }
-    memcpy(buf, ctx.Low, need_size);
+
+    memcpy(buf, dest, need_size);
     ctx.Stack = std::make_tuple(buf, need_size);
 }
 
@@ -38,6 +39,7 @@ void Engine::Restore(context &ctx) {
     auto size = std::get<1>(ctx.Stack);
     memcpy(ctx.Low, buf, size);
     cur_routine = &ctx;
+
     longjmp(ctx.Environment, 1);
 }
 
@@ -67,7 +69,8 @@ void Engine::sched(void *routine) {
 }
 
 void Engine::Enter(context &ctx) {
-    if (cur_routine != nullptr && cur_routine != idle_ctx) {
+    assert(cur_routine != nullptr);
+    if (cur_routine != idle_ctx) {
         if (setjmp(cur_routine->Environment) > 0) {
             return;
         }
